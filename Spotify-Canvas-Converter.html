@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Canvas Converter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Import Cropper.js for the cropping functionality -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #181818;
+            color: #ffffff;
+        }
+        .bg-spotify-dark { background-color: #212121; }
+        .bg-spotify-light-dark { background-color: #282828; }
+        .border-spotify-gray { border-color: #404040; }
+        .text-spotify-green { color: #1DB954; }
+        .bg-spotify-green { background-color: #1DB954; }
+        .bg-spotify-green:hover { background-color: #1ed760; }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1DB954;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Cropper.js needs a block-level image */
+        #cropper-image {
+            display: block;
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen py-8">
+
+    <div class="bg-spotify-dark p-6 sm:p-8 rounded-xl shadow-lg w-full max-w-lg mx-4">
+        <div class="text-center mb-6">
+            <h1 class="text-2xl sm:text-3xl font-bold text-white">Spotify Canvas Converter</h1>
+            <p class="text-gray-400 mt-2">Create a 9:16 vertical video or image for your track.</p>
+        </div>
+
+        <!-- File Upload Area -->
+        <div id="upload-area" class="border-2 border-dashed border-spotify-gray rounded-lg p-8 text-center cursor-pointer hover:border-spotify-green transition-colors duration-300">
+            <input type="file" id="file-upload" accept="video/*,image/*" class="hidden">
+            <label for="file-upload" class="flex flex-col items-center cursor-pointer">
+                 <svg class="w-12 h-12 text-gray-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                </svg>
+                <p class="font-semibold">Drag & drop a file or <span class="text-spotify-green">browse</span></p>
+                <p class="text-xs text-gray-500 mt-1">MP4, MOV, or Image file. At least 720px tall.</p>
+            </label>
+        </div>
+        
+        <!-- Cropping UI Area -->
+        <div id="crop-area" class="hidden mt-6 text-center">
+            <p class="text-gray-400 mb-4">Adjust the selection to crop your file.</p>
+            <div>
+                <img id="cropper-image" src="">
+            </div>
+            <div class="mt-4 flex justify-center space-x-4">
+                <button id="cancel-crop-btn" class="bg-gray-600 text-white font-bold py-2 px-6 rounded-full hover:bg-gray-700 transition-colors">Cancel</button>
+                <button id="confirm-crop-btn" class="bg-spotify-green text-white font-bold py-2 px-6 rounded-full hover:bg-spotify-green/90 transition-colors">Confirm Crop</button>
+            </div>
+        </div>
+
+
+        <!-- Processing/Preview Area -->
+        <div id="processing-area" class="hidden mt-6 text-center">
+            <div id="loader" class="loader mx-auto"></div>
+            <p id="status-text" class="text-gray-400 mt-2">Processing...</p>
+            <video id="video-preview" class="rounded-lg w-full max-w-xs mx-auto mt-4 hidden" controls muted loop playsinline></video>
+            <img id="image-preview" class="rounded-lg w-full max-w-xs mx-auto mt-4 hidden" alt="Image Preview">
+            <canvas id="canvas" class="hidden"></canvas>
+        </div>
+
+        <!-- Download Button -->
+        <div id="download-area" class="mt-6 text-center hidden">
+            <a id="download-btn" class="bg-spotify-green text-white font-bold py-3 px-8 rounded-full inline-block transition-transform duration-300 hover:scale-105">Download Canvas</a>
+        </div>
+         <!-- Message Box -->
+        <div id="message-box" class="hidden mt-4 bg-red-800 border border-red-600 text-white px-4 py-3 rounded-lg relative" role="alert">
+            <strong class="font-bold">Error:</strong>
+            <span id="message-text" class="block sm:inline"></span>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const uploadArea = document.getElementById('upload-area');
+        const uploadInput = document.getElementById('file-upload');
+        const cropArea = document.getElementById('crop-area');
+        const cropperImage = document.getElementById('cropper-image');
+        const confirmCropBtn = document.getElementById('confirm-crop-btn');
+        const cancelCropBtn = document.getElementById('cancel-crop-btn');
+        const processingArea = document.getElementById('processing-area');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+        const videoPreview = document.getElementById('video-preview');
+        const imagePreview = document.getElementById('image-preview');
+        const canvas = document.getElementById('canvas');
+        const downloadArea = document.getElementById('download-area');
+        const downloadBtn = document.getElementById('download-btn');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+
+        // --- State Variables ---
+        let cropper = null;
+        let originalFile = null;
+        let originalMediaElement = null;
+
+        // --- Event Listeners ---
+        // The <label> handles clicks, so no extra listener is needed on the parent div.
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('border-spotify-green');
+        });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('border-spotify-green'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('border-spotify-green');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+        uploadInput.addEventListener('change', () => {
+            if (uploadInput.files.length > 0) handleFile(uploadInput.files[0]);
+        });
+        cancelCropBtn.addEventListener('click', resetToInitialState);
+        confirmCropBtn.addEventListener('click', () => {
+            const cropData = cropper.getData(true); // get rounded data
+            if (originalFile.type.startsWith('image/')) {
+                processImage(originalMediaElement, cropData);
+            } else if (originalFile.type.startsWith('video/')) {
+                processVideo(originalMediaElement, cropData);
+            }
+        });
+
+        // --- UI Flow Functions ---
+        function showMessage(message) {
+            messageText.textContent = message;
+            messageBox.classList.remove('hidden');
+        }
+        function hideMessage() {
+            messageBox.classList.add('hidden');
+        }
+        function resetToInitialState() {
+            hideMessage();
+            uploadArea.classList.remove('hidden');
+            cropArea.classList.add('hidden');
+            processingArea.classList.add('hidden');
+            downloadArea.classList.add('hidden');
+            videoPreview.src = '';
+            imagePreview.src = '';
+            cropperImage.src = '';
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            originalFile = null;
+            originalMediaElement = null;
+            uploadInput.value = ''; // Reset file input
+        }
+        function showCropper(sourceUrl) {
+            uploadArea.classList.add('hidden');
+            cropArea.classList.remove('hidden');
+            processingArea.classList.add('hidden');
+            downloadArea.classList.add('hidden');
+            cropperImage.src = sourceUrl;
+            
+            if (cropper) cropper.destroy();
+
+            cropper = new Cropper(cropperImage, {
+                aspectRatio: 9 / 16,
+                viewMode: 1, // Restrict crop box to be within the canvas
+                autoCropArea: 1, // Start with the largest possible crop area
+                background: false,
+                responsive: true,
+                restore: false,
+                guides: false,
+                center: false,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: false, // Prevent resizing the crop box
+            });
+        }
+        function showProcessing() {
+            cropArea.classList.add('hidden');
+            processingArea.classList.remove('hidden');
+            loader.classList.remove('hidden');
+            statusText.textContent = 'Processing your file...';
+        }
+
+        // --- File Handling ---
+        function handleFile(file) {
+            resetToInitialState();
+            originalFile = file;
+
+            if (file.type.startsWith('video/')) {
+                const videoURL = URL.createObjectURL(file);
+                const video = document.createElement('video');
+                video.src = videoURL;
+                originalMediaElement = video;
+                video.onloadedmetadata = () => {
+                    // Capture the first frame for cropping preview
+                    video.currentTime = 0.1; // Seek to a point to ensure frame is loaded
+                    video.onseeked = () => {
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = video.videoWidth;
+                        tempCanvas.height = video.videoHeight;
+                        const ctx = tempCanvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0);
+                        showCropper(tempCanvas.toDataURL());
+                    };
+                };
+                video.onerror = () => handleFileError('video');
+            } else if (file.type.startsWith('image/')) {
+                const imageURL = URL.createObjectURL(file);
+                const img = new Image();
+                img.src = imageURL;
+                originalMediaElement = img; // Store image element for processing
+                img.onload = () => showCropper(imageURL);
+                img.onerror = () => handleFileError('image');
+            } else {
+                handleFileError('unsupported');
+            }
+        }
+
+        function handleFileError(type) {
+            resetToInitialState();
+            if (type === 'unsupported') {
+                showMessage('Please upload a valid video or image file.');
+            } else {
+                showMessage(`There was an error loading your ${type}. Please try another file.`);
+            }
+        }
+
+        // --- Processing Functions ---
+        function processImage(img, cropData) {
+            showProcessing();
+            try {
+                statusText.textContent = 'Converting to 9:16 JPEG...';
+                
+                // Ensure final canvas is at least 720px tall
+                let finalHeight = Math.max(720, cropData.height);
+                let finalWidth = finalHeight * (9 / 16);
+                
+                canvas.width = finalWidth;
+                canvas.height = finalHeight;
+
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(
+                    img, 
+                    cropData.x, cropData.y, cropData.width, cropData.height, // Source crop
+                    0, 0, finalWidth, finalHeight // Destination canvas
+                );
+                
+                const jpegUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+                // Update UI
+                imagePreview.src = jpegUrl;
+                imagePreview.classList.remove('hidden');
+                downloadBtn.href = jpegUrl;
+                downloadBtn.download = 'spotify-canvas.jpeg';
+                downloadArea.classList.remove('hidden');
+                processingArea.classList.remove('hidden');
+                loader.classList.add('hidden');
+                statusText.textContent = 'Your canvas is ready!';
+
+            } catch (error) {
+                console.error("Image Processing Error:", error);
+                handleFileError('image');
+            }
+        }
+
+        async function processVideo(video, cropData) {
+            showProcessing();
+            try {
+                statusText.textContent = 'Converting to 9:16 aspect ratio...';
+                
+                const finalHeight = Math.max(720, cropData.height);
+                const finalWidth = finalHeight * (9 / 16);
+                
+                canvas.width = finalWidth;
+                canvas.height = finalHeight;
+
+                const ctx = canvas.getContext('2d');
+                const stream = canvas.captureStream(30); // 30 FPS
+                const recorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
+                
+                const chunks = [];
+                recorder.ondataavailable = e => chunks.push(e.data);
+                
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    videoPreview.src = url;
+                    videoPreview.classList.remove('hidden');
+                    
+                    downloadBtn.href = url;
+                    downloadBtn.download = 'spotify-canvas.mp4';
+                    downloadArea.classList.remove('hidden');
+                    processingArea.classList.remove('hidden');
+                    loader.classList.add('hidden');
+                    statusText.textContent = 'Your canvas is ready!';
+                };
+
+                recorder.start();
+                video.currentTime = 0;
+                await video.play();
+
+                function drawFrame() {
+                    if (video.paused || video.ended) {
+                        if (recorder.state === "recording") {
+                            recorder.stop();
+                        }
+                        video.pause();
+                        return;
+                    }
+                    ctx.drawImage(
+                        video, 
+                        cropData.x, cropData.y, cropData.width, cropData.height, // Source crop
+                        0, 0, finalWidth, finalHeight // Destination canvas
+                    );
+                    requestAnimationFrame(drawFrame);
+                }
+                drawFrame();
+
+            } catch (error) {
+                console.error("Video Processing Error:", error);
+                handleFileError('video');
+            }
+        }
+    </script>
+</body>
+</html>
